@@ -59,8 +59,20 @@ def add_paths(repo_dir: Path, *paths: str) -> None:
 
 
 def commit(repo_dir: Path, message: str) -> None:
-    """Commit staged changes."""
-    run_git(repo_dir, ["commit", "-m", message])
+    """Commit staged changes with an explicit author identity.
+
+    Bind-mounted repos may lack user.name/user.email config, and the
+    container runs as root so git cannot auto-detect an email. Identity
+    comes from PUBLISHER_GIT_NAME / PUBLISHER_GIT_EMAIL env vars.
+    """
+    import os
+    name = os.environ.get("PUBLISHER_GIT_NAME", "Publisher Daemon")
+    email = os.environ.get("PUBLISHER_GIT_EMAIL", "publisher@localhost")
+    run_git(repo_dir, [
+        "-c", f"user.name={name}",
+        "-c", f"user.email={email}",
+        "commit", "-m", message,
+    ])
 
 
 def push_branch(repo_dir: Path, branch: str) -> None:
