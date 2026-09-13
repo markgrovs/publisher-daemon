@@ -13,6 +13,10 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy setup files first
+COPY setup.py setup.py
+COPY pyproject.toml . 2>/dev/null || true
+
 # Copy publisher package and scripts
 COPY publisher/ ./publisher/
 COPY scripts/ ./scripts/
