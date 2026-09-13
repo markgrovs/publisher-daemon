@@ -16,20 +16,20 @@ def run_git(repo_dir: Path, args: list, check: bool = True) -> subprocess.Comple
     """
     import os
     
-    cmd = [\"git\", \"-C\", str(repo_dir)] + args
+    cmd = ["git", "-C", str(repo_dir)] + args
     env = os.environ.copy()
-    env[\"GIT_SSH_COMMAND\"] = \"ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new\"
+    env["GIT_SSH_COMMAND"] = "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
     
-    logger.debug(\"Executing: %s\", ' '.join(cmd))
+    logger.debug("Executing: %s", ' '.join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     
     if result.returncode != 0:
-        logger.debug(\"Git stderr: %s\", result.stderr)
+        logger.debug("Git stderr: %s", result.stderr)
         if check:
-            raise RuntimeError(f\"Git failed: {' '.join(cmd)}\\nStderr: {result.stderr}\")
+            raise RuntimeError(f"Git failed: {' '.join(cmd)}\nStderr: {result.stderr}")
     else:
         if result.stdout.strip():
-            logger.debug(\"Git stdout: %s\", result.stdout.strip())
+            logger.debug("Git stdout: %s", result.stdout.strip())
     
     return result
 
