@@ -9,6 +9,21 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from .frontmatter import parse_frontmatter
+
+
+def find_post_markdown(post_dir: Path) -> Optional[Path]:
+    """
+    Locate the markdown file for a post bundle.
+    Prefers index.md; falls back to the sole .md file in the folder
+    (handles names like index.md.md or my-post.md).
+    """
+    index_file = post_dir / "index.md"
+    if index_file.exists():
+        return index_file
+    md_files = sorted(post_dir.glob("*.md"))
+    if len(md_files) == 1:
+        return md_files[0]
+    return None
 from .image_processor import process_markdown_and_assets
 
 
@@ -40,7 +55,7 @@ def is_draft(md_file: Path) -> bool:
     return fm.get("draft", "").lower() in ("true", "yes")
 
 
-def sync_owned(config: SyncConfig) -> List[Path]:
+def sync_owned(config: SyncConfig, include_drafts: bool = False) -> List[Path]:
     """
     Scan vault for publishable posts under owned paths.
     Create page bundles in the repo.
@@ -62,10 +77,11 @@ def sync_owned(config: SyncConfig) -> List[Path]:
             for post_dir in sorted(vault_path.iterdir()):
                 if not post_dir.is_dir():
                     continue
-                index_file = post_dir / "index.md"
-                if not index_file.exists():
+                index_file = find_post_markdown(post_dir)
+                if index_file is None:
+                    logging.warning("Post bundle %s has no markdown file; skipping", post_dir.name)
                     continue
-                if is_draft(index_file):
+                if is_draft(index_file) and not include_drafts:
                     logging.info("Skipping draft post: %s", post_dir.name)
                     continue
 

@@ -79,8 +79,8 @@ class PublisherDaemon:
             checkout_branch(self.config.repo_dir, self.preview_branch)
             self.logger.info("✓ Checkout complete")
 
-            self.logger.info("→ Syncing vault to repo...")
-            published = sync_owned(self.config)
+            self.logger.info("→ Syncing vault to repo (drafts included for preview)...")
+            published = sync_owned(self.config, include_drafts=True)
             if not published:
                 self.logger.info("✗ No changes synced from vault.")
                 update_publish_state(self.publish_file, "idle", "No changes")
@@ -128,8 +128,8 @@ class PublisherDaemon:
             checkout_branch(self.config.repo_dir, self.preview_branch)
             self.logger.info("✓ Checkout complete")
 
-            self.logger.info("→ Syncing vault to repo...")
-            published = sync_owned(self.config)
+            self.logger.info("→ Syncing vault to repo (drafts excluded for production)...")
+            published = sync_owned(self.config, include_drafts=False)
             if not published:
                 self.logger.info("✗ No changes synced from vault.")
                 update_publish_state(self.publish_file, "idle", "No changes")
