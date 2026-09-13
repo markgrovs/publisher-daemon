@@ -27,5 +27,5 @@ RUN pip install -e . && \
 # Ensure entrypoints are executable
 RUN chmod +x scripts/*.py
 
-# Default to nextmountain entrypoint (can be overridden in Compose)
-ENTRYPOINT ["python3", "scripts/nextmountain_entrypoint.py"]
+# Default to nextmountain entrypoint (fully overridable in Compose via command:)
+CMD ["python3", "scripts/nextmountain_entrypoint.py"]
