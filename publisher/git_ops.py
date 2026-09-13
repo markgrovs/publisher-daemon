@@ -16,7 +16,8 @@ def run_git(repo_dir: Path, args: list, check: bool = True) -> subprocess.Comple
     """
     import os
     
-    cmd = ["git", "-C", str(repo_dir)] + args
+    # -c safe.directory bypasses git's ownership check for bind-mounted repos
+    cmd = ["git", "-c", f"safe.directory={repo_dir}", "-C", str(repo_dir)] + args
     env = os.environ.copy()
     env["GIT_SSH_COMMAND"] = "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
     
