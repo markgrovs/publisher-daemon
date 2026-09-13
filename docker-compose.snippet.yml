@@ -1,0 +1,33 @@
+# Publisher daemon services for Workbench
+# Add these to /opt/stacks/obsidian-sync/docker-compose.yml
+
+services:
+  nextmountain-publisher:
+    build:
+      context: ./publisher-daemon
+      dockerfile: Dockerfile
+    entrypoint: python3 scripts/nextmountain_entrypoint.py --poll-interval 5
+    volumes:
+      - ./vaults/NextMountain-Blog:/vault:ro
+      - ./blog-repo:/repo
+      - ./publisher-ssh/id_ed25519:/.ssh/id_ed25519:ro
+    environment:
+      - GIT_SSH_COMMAND=ssh -i /.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new
+    restart: unless-stopped
+    depends_on:
+      - sync-nextmountainblog
+
+  markgrovesus-publisher:
+    build:
+      context: ./publisher-daemon
+      dockerfile: Dockerfile
+    entrypoint: python3 scripts/markgroves_entrypoint.py --poll-interval 5
+    volumes:
+      - ./vaults/MarkGroves-US:/vault:ro
+      - ./markgroves-repo:/repo
+      - ./markgrovesus-ssh/id_ed25519:/.ssh/id_ed25519:ro
+    environment:
+      - GIT_SSH_COMMAND=ssh -i /.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new
+    restart: unless-stopped
+    depends_on:
+      - sync-markgrovesus
