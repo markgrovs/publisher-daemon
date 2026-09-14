@@ -80,8 +80,18 @@ def merge_branch(repo_dir: Path, source_branch: str) -> str:
     Merge source_branch into the currently checked-out branch.
     Uses --no-ff so the merge is always recorded as a merge commit,
     making production history explicit. Returns git's summary output.
+
+    A merge creates a commit, so it needs the same explicit identity
+    injection as commit() (bind-mounted repos lack user.name/user.email).
     """
-    result = run_git(repo_dir, ["merge", "--no-ff", "-m", f"Merge {source_branch} into production", source_branch])
+    import os
+    name = os.environ.get("PUBLISHER_GIT_NAME", "Publisher Daemon")
+    email = os.environ.get("PUBLISHER_GIT_EMAIL", "publisher@localhost")
+    result = run_git(repo_dir, [
+        "-c", f"user.name={name}",
+        "-c", f"user.email={email}",
+        "merge", "--no-ff", "-m", f"Merge {source_branch} into production", source_branch,
+    ])
     return result.stdout.strip()
 
 
