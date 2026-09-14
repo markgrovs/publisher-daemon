@@ -1,5 +1,11 @@
 """
 Core publisher orchestration: watch vault, process, commit, push.
+
+Model: the vault is the single source of truth. build-preview mirrors
+vault content (drafts included, draft flag intact) to the preview
+branch. publish-production syncs preview, then merges preview into
+main — Hugo's --buildDrafts flag (preview only) is what keeps drafts
+dark in production, so the two branches never diverge in content.
 """
 
 import logging
@@ -16,6 +22,7 @@ from .git_ops import (
     commit,
     push_branch,
     get_commit_hash,
+    merge_branch,
 )
 from .sync import sync_owned, SyncConfig
 
@@ -66,48 +73,57 @@ class PublisherDaemon:
             self.logger.error("Action failed: %s", e, exc_info=True)
             update_publish_state(self.publish_file, "idle", f"Error: {e}")
 
+    def _sync_and_push(self, branch: str, commit_message: str) -> Optional[str]:
+        """
+        Mirror vault content to the given branch and push.
+        Returns the commit hash if a new commit was pushed,
+        or None if there was nothing to commit.
+        """
+        self.logger.info("→ Fetching origin...")
+        fetch_origin(self.config.repo_dir)
+        self.logger.info("✓ Fetch complete")
+
+        self.logger.info("→ Checking out %s branch...", branch)
+        checkout_branch(self.config.repo_dir, branch)
+        self.logger.info("✓ Checkout complete")
+
+        self.logger.info("→ Syncing vault to repo...")
+        touched = sync_owned(self.config, include_drafts=True)
+        self.logger.info("✓ Sync touched %d item(s)", len(touched))
+
+        self.logger.info("→ Checking git status...")
+        status = get_status(self.config.repo_dir)
+        if not status:
+            self.logger.info("✗ No changes after sync — repo already mirrors vault.")
+            return None
+        self.logger.info("✓ Git status:\n%s", status)
+
+        self.logger.info("→ Staging files...")
+        add_paths(self.config.repo_dir, "-A")
+        self.logger.info("✓ Files staged")
+
+        self.logger.info("→ Committing...")
+        commit(self.config.repo_dir, commit_message)
+        self.logger.info("✓ Commit created")
+
+        self.logger.info("→ Pushing to %s...", branch)
+        push_branch(self.config.repo_dir, branch)
+        self.logger.info("✓ Push complete")
+
+        return get_commit_hash(self.config.repo_dir)
+
     def _do_build_preview(self) -> None:
-        """Sync vault, commit, and push to preview branch."""
+        """Mirror vault to the preview branch (drafts included, flag intact)."""
         self.logger.info("=== BUILD-PREVIEW started ===")
-        
+
         try:
-            self.logger.info("→ Fetching origin...")
-            fetch_origin(self.config.repo_dir)
-            self.logger.info("✓ Fetch complete")
-            
-            self.logger.info("→ Checking out preview branch...")
-            checkout_branch(self.config.repo_dir, self.preview_branch)
-            self.logger.info("✓ Checkout complete")
-
-            self.logger.info("→ Syncing vault to repo (drafts included for preview)...")
-            published = sync_owned(self.config, include_drafts=True)
-            if not published:
-                self.logger.info("✗ No changes synced from vault.")
+            commit_hash = self._sync_and_push(
+                self.preview_branch,
+                "Automated publish (preview): mirror vault to preview",
+            )
+            if commit_hash is None:
                 update_publish_state(self.publish_file, "idle", "No changes")
                 return
-            self.logger.info("✓ Synced %d item(s): %s", len(published), [str(p.relative_to(self.config.repo_dir)) for p in published])
-
-            self.logger.info("→ Checking git status...")
-            status = get_status(self.config.repo_dir)
-            if not status:
-                self.logger.info("✗ No staged changes after sync.")
-                update_publish_state(self.publish_file, "idle", "No changes")
-                return
-            self.logger.info("✓ Git status:\n%s", status)
-
-            self.logger.info("→ Staging files...")
-            add_paths(self.config.repo_dir, *[str(p) for p in published])
-            self.logger.info("✓ Files staged")
-            
-            self.logger.info("→ Committing...")
-            commit(self.config.repo_dir, "Automated MarkGroves-US publish (preview)")
-            self.logger.info("✓ Commit created")
-            
-            self.logger.info("→ Pushing to preview branch...")
-            push_branch(self.config.repo_dir, self.preview_branch)
-            self.logger.info("✓ Push complete")
-
-            commit_hash = get_commit_hash(self.config.repo_dir)
             msg = f"Preview published: {commit_hash}"
             self.logger.info("=== BUILD-PREVIEW SUCCESS: %s ===", msg)
             update_publish_state(self.publish_file, "idle", msg)
@@ -116,50 +132,38 @@ class PublisherDaemon:
             raise
 
     def _do_publish_production(self) -> None:
-        """Merge preview into production and push."""
+        """
+        Production publish: sync vault to preview first (so preview stays
+        the exact mirror), then merge preview into main and push.
+        Hugo renders drafts dark on main (no --buildDrafts), so the
+        draft flag in frontmatter is the only publish/takedown switch.
+        """
         self.logger.info("=== PUBLISH-PRODUCTION started ===")
-        
+
         try:
-            self.logger.info("→ Fetching origin...")
-            fetch_origin(self.config.repo_dir)
-            self.logger.info("✓ Fetch complete")
-            
-            self.logger.info("→ Checking out preview branch...")
-            checkout_branch(self.config.repo_dir, self.preview_branch)
-            self.logger.info("✓ Checkout complete")
+            # Step 1: bring preview up to date with the vault.
+            preview_hash = self._sync_and_push(
+                self.preview_branch,
+                "Automated publish (preview): mirror vault to preview",
+            )
+            if preview_hash:
+                self.logger.info("✓ Preview updated: %s", preview_hash)
+            else:
+                self.logger.info("✓ Preview already mirrors vault")
 
-            self.logger.info("→ Syncing vault to repo (drafts excluded for production)...")
-            published = sync_owned(self.config, include_drafts=False)
-            if not published:
-                self.logger.info("✗ No changes synced from vault.")
-                update_publish_state(self.publish_file, "idle", "No changes")
-                return
-            self.logger.info("✓ Synced %d item(s): %s", len(published), [str(p.relative_to(self.config.repo_dir)) for p in published])
-
-            self.logger.info("→ Checking git status...")
-            status = get_status(self.config.repo_dir)
-            if not status:
-                self.logger.info("✗ No staged changes after sync.")
-                update_publish_state(self.publish_file, "idle", "No changes")
-                return
-            self.logger.info("✓ Git status:\n%s", status)
-
-            self.logger.info("→ Staging files...")
-            add_paths(self.config.repo_dir, *[str(p) for p in published])
-            self.logger.info("✓ Files staged")
-            
-            self.logger.info("→ Committing to preview...")
-            commit(self.config.repo_dir, "Automated MarkGroves-US publish (production)")
-            self.logger.info("✓ Commit created")
-            
-            self.logger.info("→ Pushing preview branch...")
-            push_branch(self.config.repo_dir, self.preview_branch)
-            self.logger.info("✓ Push complete")
-
-            self.logger.info("→ Checking out production branch...")
+            # Step 2: merge preview into main.
+            self.logger.info("→ Checking out %s branch...", self.production_branch)
             checkout_branch(self.config.repo_dir, self.production_branch)
             self.logger.info("✓ Checkout complete")
-            
+
+            self.logger.info("→ Merging %s into %s...", self.preview_branch, self.production_branch)
+            merge_result = merge_branch(self.config.repo_dir, self.preview_branch)
+            self.logger.info("✓ Merge complete: %s", merge_result)
+
+            self.logger.info("→ Pushing to %s...", self.production_branch)
+            push_branch(self.config.repo_dir, self.production_branch)
+            self.logger.info("✓ Push complete")
+
             commit_hash = get_commit_hash(self.config.repo_dir)
             msg = f"Production published: {commit_hash}"
             self.logger.info("=== PUBLISH-PRODUCTION SUCCESS: %s ===", msg)
@@ -186,5 +190,5 @@ class PublisherDaemon:
                 break
             except Exception as e:
                 self.logger.error("[Poll #%d] Polling error: %s", poll_count, e, exc_info=True)
-            
+
             time.sleep(self.poll_interval)

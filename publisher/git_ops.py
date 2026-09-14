@@ -75,6 +75,16 @@ def commit(repo_dir: Path, message: str) -> None:
     ])
 
 
+def merge_branch(repo_dir: Path, source_branch: str) -> str:
+    """
+    Merge source_branch into the currently checked-out branch.
+    Uses --no-ff so the merge is always recorded as a merge commit,
+    making production history explicit. Returns git's summary output.
+    """
+    result = run_git(repo_dir, ["merge", "--no-ff", "-m", f"Merge {source_branch} into production", source_branch])
+    return result.stdout.strip()
+
+
 def push_branch(repo_dir: Path, branch: str) -> None:
     """Push branch to origin."""
     run_git(repo_dir, ["push", "origin", branch])

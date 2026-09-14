@@ -1,7 +1,14 @@
 """
 Vault→Repo synchronization logic for site-specific ownership paths.
+
+Mirror semantics: the vault is the single source of truth for owned content.
+Every sync rewrites all owned content into the repo, then prunes any path
+the daemon previously wrote that no longer exists in the vault. A manifest
+(.publisher-manifest.json in the repo root) records what the daemon wrote,
+so legacy files the daemon never touched are never pruned.
 """
 
+import json
 import logging
 import shutil
 from pathlib import Path
@@ -9,6 +16,9 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from .frontmatter import parse_frontmatter
+from .image_processor import process_markdown_and_assets
+
+MANIFEST_NAME = ".publisher-manifest.json"
 
 
 def find_post_markdown(post_dir: Path) -> Optional[Path]:
@@ -24,7 +34,6 @@ def find_post_markdown(post_dir: Path) -> Optional[Path]:
     if len(md_files) == 1:
         return md_files[0]
     return None
-from .image_processor import process_markdown_and_assets
 
 
 @dataclass
@@ -55,25 +64,71 @@ def is_draft(md_file: Path) -> bool:
     return fm.get("draft", "").lower() in ("true", "yes")
 
 
-def sync_owned(config: SyncConfig, include_drafts: bool = False) -> List[Path]:
+def _load_manifest(repo_dir: Path) -> dict:
+    manifest_file = repo_dir / MANIFEST_NAME
+    if manifest_file.exists():
+        try:
+            return json.loads(manifest_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            logging.warning("Manifest unreadable; starting fresh: %s", manifest_file)
+    return {"paths": []}
+
+
+def _save_manifest(repo_dir: Path, paths: List[str]) -> None:
+    manifest_file = repo_dir / MANIFEST_NAME
+    manifest_file.write_text(
+        json.dumps({"paths": sorted(paths)}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _prune_missing(config: SyncConfig, previous: List[str], current: set) -> List[Path]:
     """
-    Scan vault for publishable posts under owned paths.
-    Create page bundles in the repo.
-    Returns list of modified/created bundle directories.
+    Remove repo paths the daemon previously wrote that are no longer
+    produced from the vault. Returns list of removed paths.
     """
-    published = []
+    removed = []
+    for rel in previous:
+        if rel in current:
+            continue
+        target = config.repo_dir / rel
+        if not target.exists():
+            continue
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+        logging.info("Pruned (no longer in vault): %s", rel)
+        removed.append(target)
+    return removed
+
+
+def sync_owned(config: SyncConfig, include_drafts: bool = True) -> List[Path]:
+    """
+    Mirror all owned vault content into the repo.
+
+    Writes every publishable vault item (drafts included, with their
+    draft flag intact — Hugo's --buildDrafts flag decides visibility),
+    then prunes previously-written paths that vanished from the vault.
+
+    Returns list of repo paths that were written or pruned (candidates
+    for git staging). Git status remains the source of truth for
+    whether anything actually changed.
+    """
+    written: List[Path] = []
+    current_rels: set = set()
 
     for vault_subdir, repo_subdir in config.ownership.items():
         vault_path = config.vault_dir / vault_subdir
         if not vault_path.exists():
-            logging.info("Vault subdir not found: %s (skipped)", vault_subdir)
+            logging.info("Vault subdir not found: %s (skipping)", vault_subdir)
             continue
 
         repo_path = config.repo_dir / repo_subdir
         repo_path.mkdir(parents=True, exist_ok=True)
 
         if vault_subdir == "posts":
-            # Handle post bundles: YYYY-MM-DD-slug/index.md
+            # Handle post bundles: YYYY-MM-DD-slug/<markdown>
             for post_dir in sorted(vault_path.iterdir()):
                 if not post_dir.is_dir():
                     continue
@@ -94,22 +149,29 @@ def sync_owned(config: SyncConfig, include_drafts: bool = False) -> List[Path]:
                     max_width=config.max_image_width,
                     quality=config.image_quality,
                 )
-                published.append(bundle_dir)
+                written.append(bundle_dir)
+                current_rels.add(str(bundle_dir.relative_to(config.repo_dir)))
 
         else:
             # Handle flat files: links/, pages/ etc.
             # Copy .md files directly; optional image handling per file.
             for md_file in vault_path.glob("*.md"):
-                if is_draft(md_file):
+                if is_draft(md_file) and not include_drafts:
                     logging.info("Skipping draft file: %s", md_file.name)
                     continue
 
                 dest = repo_path / md_file.name
                 dest.write_text(md_file.read_text(encoding="utf-8"), encoding="utf-8")
-                published.append(dest)
+                written.append(dest)
+                current_rels.add(str(dest.relative_to(config.repo_dir)))
                 logging.info("Synced file: %s -> %s", md_file.name, repo_subdir)
 
-    return published
+    # Mirror: prune daemon-written paths that no longer exist in the vault.
+    manifest = _load_manifest(config.repo_dir)
+    removed = _prune_missing(config, manifest.get("paths", []), current_rels)
+    _save_manifest(config.repo_dir, current_rels)
+
+    return written + removed
 
 
 def clean_legacy(config: SyncConfig, keep_paths: Optional[List[str]] = None) -> None:
