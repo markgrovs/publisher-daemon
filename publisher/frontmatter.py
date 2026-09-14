@@ -34,6 +34,19 @@ def parse_frontmatter(text: str) -> Tuple[Dict[str, str], str]:
     return data, body
 
 
+def _yaml_quote(value: str) -> str:
+    """
+    Quote a value for YAML frontmatter so Obsidian's strict property
+    parser accepts it. Unquoted values containing ": " (like
+    "Preview published: abc123") or bare timestamps render as invalid
+    properties in Obsidian. Newlines are collapsed so multi-line
+    error messages stay within a single property line.
+    """
+    collapsed = " ".join(value.split())
+    escaped = collapsed.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def update_publish_state(publish_file: Path, action: str, status_msg: str) -> None:
     """
     Update PUBLISH.md with action, timestamp, and status.
@@ -49,8 +62,8 @@ def update_publish_state(publish_file: Path, action: str, status_msg: str) -> No
         "---",
         f"action: {action}",
         "target: current",
-        f"last_run: {timestamp}",
-        f"last_status: {status_msg}",
+        f"last_run: {_yaml_quote(timestamp)}",
+        f"last_status: {_yaml_quote(status_msg)}",
         "---",
         ""
     ]
