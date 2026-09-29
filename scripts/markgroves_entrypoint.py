@@ -42,6 +42,8 @@ def main():
         "posts": "content/posts",
         "pages": "content",
         "links": "content/links",
+        "log": "content/logs",
+        "essays": "content/essays",
     }
 
     config = SyncConfig(
