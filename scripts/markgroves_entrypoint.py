@@ -42,7 +42,7 @@ def main():
         "posts": "content/posts",
         "pages": "content",
         "links": "content/links",
-        "log": "content/logs",
+        "logs": "content/logs",
         "essays": "content/essays",
     }
 
