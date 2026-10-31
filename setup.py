@@ -10,5 +10,6 @@ setup(
     python_requires=">=3.11",
     install_requires=[
         "Pillow>=12.0.0",
+        "PyYAML>=6.0.1",
     ],
 )

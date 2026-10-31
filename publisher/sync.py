@@ -13,7 +13,7 @@ import logging
 import shutil
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from .frontmatter import parse_frontmatter
 from .image_processor import process_markdown_and_assets
@@ -51,6 +51,7 @@ class SyncConfig:
 
     max_image_width: int = 1800
     image_quality: int = 82
+    sync_handler: Optional[Callable] = None
 
     def __post_init__(self):
         self.vault_dir = Path(self.vault_dir).resolve()
@@ -115,6 +116,9 @@ def sync_owned(config: SyncConfig, include_drafts: bool = True) -> List[Path]:
     for git staging). Git status remains the source of truth for
     whether anything actually changed.
     """
+    if config.sync_handler is not None:
+        return config.sync_handler(config, include_drafts=include_drafts)
+
     written: List[Path] = []
     current_rels: set = set()
 
