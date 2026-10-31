@@ -11,7 +11,8 @@ import argparse
 import logging
 from pathlib import Path
 
-from publisher import PublisherDaemon, SyncConfig
+from publisher import PublisherDaemon
+from publisher.nextmountain import create_config
 
 
 def main():
@@ -36,21 +37,7 @@ def main():
     repo_dir = Path("/repo")
     publish_file = vault_dir / "PUBLISH.md"
 
-    # Ownership: vault subdir -> repo subdir
-    # NextMountain-Blog uses flat structure: posts/, drafts/, pages/
-    ownership = {
-        "posts": "content/posts",
-        "drafts": "content/drafts",
-        "pages": "content",
-    }
-
-    config = SyncConfig(
-        vault_dir=vault_dir,
-        repo_dir=repo_dir,
-        ownership=ownership,
-        max_image_width=1800,
-        image_quality=82,
-    )
+    config = create_config(vault_dir, repo_dir)
 
     daemon = PublisherDaemon(
         config=config,
