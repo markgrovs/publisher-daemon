@@ -174,10 +174,20 @@ def bundles(folder, index_name):
         if item.is_dir():
             source = item/index_name
             if not source.exists():
+                folder_note = item / f"{item.name}.md"
                 choices = list(item.glob('*.md'))
-                if len(choices) != 1:
-                    raise ValueError(f"Bundle {item.name} needs {index_name} or one Markdown file")
-                source = choices[0]
+                if folder_note.is_file():
+                    source = folder_note
+                elif len(choices) == 1:
+                    source = choices[0]
+                elif not choices:
+                    # Attachment-only directories are not content bundles.
+                    # Do not silently ignore notes nested in organizational folders.
+                    if any(item.rglob('*.md')):
+                        raise ValueError(f"Nested notes in {item.name}: put each content bundle directly in {folder}")
+                    continue
+                else:
+                    raise ValueError(f"Bundle {item.name} needs {index_name}, {item.name}.md, or one Markdown file")
             slug = item.name
         elif item.suffix == '.md':
             if item.name == '_index.md':
